@@ -62,18 +62,70 @@ ${previousContext}
 - 回答はプレーンテキストのみ（**太字**などMarkdown記法は使わない）
 - 重要な確認事項や提案は積極的に伝える
 - このフェーズで話すべき内容が十分に固まったと判断したら、「内容が固まりましたね。次のフェーズに引き継ぎます。よろしければ次に進みましょう」のように次のエージェントへの引き継ぎを提案する
-- あなたがコウ（実装担当）の場合、実装がすべて完了したら「実装完了です。フェーズを完了すると自動でVercelにデプロイされます。画面下の『コウのフェーズを完了して次のエージェントへ』ボタンを押してください」と伝えること
+- あなたがコウ（実装担当）の場合、実装がすべて完了したら、以下のセットアップ手順をチャット内にすべてそのまま記載して案内すること。手順を省略したり「詳細は別途」などと言ったりしてはならない。
 - あなたがハル（最終チェック担当）の場合、チェックが完了したら以下の文言を必ずそのまま伝えること：「すべての確認が完了しました！画面下の緑の『Vercelにデプロイ』ボタンを押してください。デプロイが完了すると公開URLが表示されます。そのURLからどこからでもアクセスできます。」
 
-【絶対禁止事項（CRITICAL: 違反厳禁）】
-以下の内容は一切案内してはならない。どんな状況でも例外なく禁止。
-- .env.localの編集方法・内容（環境変数の手動設定）
-- npm run dev / npm install / npm run build などのコマンド実行手順
-- Supabaseのプロジェクト作成・SQL実行・スキーマ適用・Storage設定手順
-- localhostでの動作確認方法
-- 環境構築・サーバー起動に関する手順説明
-- 「動かす前にやること」「セットアップ手順」的な案内
-これらを聞かれた場合は「そのあたりはシステムが自動でやります。フェーズ完了ボタンを押してください」とだけ答えること。`;
+【コウ実装完了時に必ずチャットに出力するセットアップ手順】
+実装完了を伝えた後、以下の内容をそのまま（プロジェクト内容に合わせて微調整してよいが、各ステップの細かさは維持すること）出力すること：
+
+動かすために、以下の手順を上から順番に行ってください。
+
+■ STEP 1：Supabase にログインする
+1. https://supabase.com/dashboard をブラウザで開く
+2. アカウントがない場合は「Start your project」→「Sign Up」でアカウント作成（GitHub ログインが簡単）
+3. ログインすると「All Projects」画面が表示される
+
+■ STEP 2：新しいプロジェクトを作成する
+1. 画面左上の緑色「New project」ボタンをクリック
+2. Organization はデフォルト（Personal）のまま次へ
+3. Project name に好きな名前を英数字で入力（例：my-app）
+4. Database Password に安全なパスワードを入力してどこかにメモしておく
+5. Region は「Northeast Asia (Tokyo)」を選択
+6. 「Create new project」をクリック
+7. 「Setting up your project...」が表示されるので 1〜2分待つ。「Welcome to your new project」が出たら完了
+
+■ STEP 3：データベースのテーブルを作成する
+1. Finder で ホーム → claude_setup → devstudio フォルダを開き「supabase-schema.sql」をテキストエディタで開く
+2. ファイルの中身を全部選択（Command + A）してコピー（Command + C）
+3. Supabase ダッシュボードの左サイドバーにある「<>」アイコン（SQL Editor）をクリック
+4. 画面中央の入力エリア（「Write a query...」と書いてある場所）をクリック
+5. 全選択（Command + A）してから貼り付け（Command + V）
+6. 右下の緑色「Run」ボタンをクリック（または Command + Enter）
+7. 画面下部に「Success. No rows returned」と出れば完了
+
+■ STEP 4：画像保存用バケットを作成する
+1. 左サイドバーの「Storage」（バケツアイコン）をクリック
+2. 「New bucket」ボタンをクリック
+3. バケット名に「receipt-images」と入力
+4. 「Public bucket」のトグルは必ず OFF のまま
+5. 「Save」をクリック。リストに「receipt-images」が出れば完了
+
+■ STEP 5：接続情報（URL と API Key）を取得する
+1. 左サイドバー一番下の「Settings」（歯車アイコン）をクリック
+2. 左メニューの「API」をクリック
+3. 「Project URL」右の「Copy」ボタンをクリック → メモしておく（NEXT_PUBLIC_SUPABASE_URL に使う）
+4. 少し下にスクロールして「Project API keys」の「anon」行の「Copy」をクリック → メモしておく（NEXT_PUBLIC_SUPABASE_ANON_KEY に使う）
+
+■ STEP 6：設定ファイル（.env.local）に書き込む
+1. Finder を開き、Command + Shift + .（ピリオド）を押して隠しファイルを表示する
+2. ホーム → claude_setup → devstudio 内の「.env.local」を右クリック → 「このアプリケーションで開く」→「テキストエディット」
+3. NEXT_PUBLIC_SUPABASE_URL= の右側に STEP 5 でコピーした URL を貼り付ける
+4. NEXT_PUBLIC_SUPABASE_ANON_KEY= の右側に STEP 5 でコピーした anon キーを貼り付ける
+5. Command + S で保存して閉じる
+
+■ STEP 7：ログイン用アカウントを作る
+1. Supabase ダッシュボードの左サイドバーで「Authentication」（人型アイコン）→「Users」タブを開く
+2. 右上「Add user」→「Create new user」をクリック
+3. メールアドレス（例：me@example.com）とパスワードを入力して「Create user」
+4. リストにユーザーが追加されれば完了
+
+■ STEP 8：アプリを起動してログインする
+1. ターミナルを開き（Dock の黒いアイコン）以下のコマンドを実行：cd ~/claude_setup/devstudio && npm run dev --webpack
+2. 「Ready in ...ms」と表示されたら起動完了
+3. ブラウザで http://localhost:3000/auth/login を開く
+4. STEP 7 で作ったメールとパスワードでログイン
+
+すべて完了したら、画面下の「コウのフェーズを完了して次のエージェントへ」ボタンを押してください。ボタンを押すと自動で Vercel にデプロイされます。`;
 
 }
 

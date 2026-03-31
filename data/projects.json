@@ -4,8 +4,8 @@
     "name": "領収書整理アプリ",
     "description": "領収書を撮影・整理・集計するアプリ",
     "createdAt": 1743430000000,
-    "updatedAt": 1774956266732,
-    "currentAgent": 3,
+    "updatedAt": 1774979726313,
+    "currentAgent": 4,
     "sessions": [
       {
         "agentId": 1,
@@ -288,7 +288,7 @@
             "timestamp": 1774956266732
           }
         ],
-        "completed": false
+        "completed": true
       },
       {
         "agentId": 4,

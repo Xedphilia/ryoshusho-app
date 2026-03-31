@@ -19,81 +19,115 @@ interface Action {
 const STEPS: Step[] = [
   {
     number: 1,
-    title: "Supabase プロジェクトを作成する",
-    description: "クラウドのデータベースサービス「Supabase」に新しいプロジェクトを作る。",
+    title: "Supabase アカウントを作成 / ログインする",
+    description: "まず Supabase のアカウントが必要。すでにある場合はログインするだけでOK。",
     actions: [
-      { label: "Supabase ダッシュボードを開く", type: "link", value: "https://supabase.com/dashboard" },
-      { label: "右上の「+ New project」をクリックして、プロジェクト名とパスワードを設定して作成", type: "text", value: "" },
+      { label: "Supabase のサイトを開く", type: "link", value: "https://supabase.com/dashboard" },
+      { label: "アカウントがない場合：画面中央の「Start your project」→「Sign Up」をクリック。GitHub や Google でのログインが一番簡単", type: "text", value: "" },
+      { label: "すでにアカウントがある場合：右上の「Sign In」からログイン", type: "text", value: "" },
+      { label: "ログインすると「All Projects」という画面が表示される。ここがスタート地点", type: "text", value: "" },
     ],
   },
   {
     number: 2,
-    title: "SQL Editor でデータベースを作成する",
-    description: "プロジェクトのデータを保存するテーブルを作る。",
+    title: "新しいプロジェクトを作成する",
+    description: "アプリ用のデータベースを入れる「プロジェクト」を新規作成する。",
     actions: [
-      { label: "プロジェクトを開いたら、左サイドバーの「<>」アイコン（SQL Editor）をクリック", type: "text", value: "" },
-      { label: "supabase-schema.sql を開いて中身を全部コピー", type: "text", value: "" },
-      { label: "SQL Editor の入力欄に貼り付けて、右下の緑「Run」ボタンを押す", type: "text", value: "" },
-      { label: "「Success. No rows returned」が出れば完了", type: "text", value: "" },
+      { label: "画面左上の「New project」ボタンをクリック（緑色のボタン）", type: "text", value: "" },
+      { label: "Organization は「Personal」のまま選択してOK（変えなくて良い）", type: "text", value: "" },
+      { label: "「Project name」に好きな名前を英数字で入力（例：my-app）", type: "text", value: "" },
+      { label: "「Database Password」に安全なパスワードを入力。どこかにメモしておく（後で使う可能性あり）", type: "text", value: "" },
+      { label: "「Region」は「Northeast Asia (Tokyo)」を選ぶと日本から速い", type: "text", value: "" },
+      { label: "「Create new project」ボタンをクリック", type: "text", value: "" },
+      { label: "「Setting up your project...」という画面になるので 1〜2分待つ。「Welcome to your new project」が出たら完了", type: "text", value: "" },
     ],
   },
   {
     number: 3,
-    title: "Storage バケットを作成する",
-    description: "領収書の画像を保存する場所を作る。",
+    title: "SQL Editor でデータベースを構築する",
+    description: "アプリが使うテーブル（データの入れ物）を作る。supabase-schema.sql ファイルを使う。",
     actions: [
-      { label: "左サイドバーの「Storage」（バケツアイコン）をクリック", type: "text", value: "" },
-      { label: "「New bucket」をクリック", type: "text", value: "" },
-      { label: "バケット名に「receipt-images」と入力、Public は OFF のまま「Save」", type: "text", value: "" },
+      { label: "まず supabase-schema.sql をテキストエディタで開く。Finder でホーム → claude_setup → devstudio の中にある", type: "text", value: "" },
+      { label: "ファイルのパス（参考）", type: "copy", value: "~/claude_setup/devstudio/supabase-schema.sql" },
+      { label: "ファイルを開いたら中身を全部選択（Command + A）してコピー（Command + C）", type: "text", value: "" },
+      { label: "Supabase ダッシュボードに戻り、左サイドバーの「<>」マーク（「SQL Editor」）をクリック", type: "text", value: "" },
+      { label: "画面中央の白い入力エリア（「Write a query...」と書いてある場所）をクリック", type: "text", value: "" },
+      { label: "全選択（Command + A）してから、コピーした内容を貼り付け（Command + V）", type: "text", value: "" },
+      { label: "右下の緑色「Run」ボタンをクリック（または Command + Enter）", type: "text", value: "" },
+      { label: "画面下部に「Success. No rows returned」と表示されれば成功。エラーが出たら内容を確認", type: "text", value: "" },
     ],
   },
   {
     number: 4,
-    title: "API Key を取得する",
-    description: "アプリがSupabaseに接続するための鍵を取得する。",
+    title: "Storage バケットを作成する",
+    description: "画像ファイルをアップロードするための保存場所「バケット」を作る。",
     actions: [
-      { label: "左サイドバー下の「Settings」（歯車アイコン）→「API Keys」をクリック", type: "text", value: "" },
-      { label: "「Legacy anon, service_role API keys」タブをクリック", type: "text", value: "" },
-      { label: "「anon」行のキー（eyJ... で始まる文字列）をコピー", type: "text", value: "" },
+      { label: "左サイドバーの「Storage」をクリック（バケツのようなアイコン）", type: "text", value: "" },
+      { label: "「New bucket」ボタンをクリック（画面右上あたり）", type: "text", value: "" },
+      { label: "「Bucket name」欄にバケット名を入力（以下をコピーして貼り付け）", type: "copy", value: "receipt-images" },
+      { label: "「Public bucket」のトグルスイッチは必ず OFF のまま（デフォルトOFF）。ONにするとURLを知っていれば誰でもアクセスできてしまうため", type: "text", value: "" },
+      { label: "「Save」ボタンをクリック。左のリストに「receipt-images」が追加されれば完了", type: "text", value: "" },
     ],
   },
   {
     number: 5,
-    title: ".env.local に設定を書き込む",
-    description: "プロジェクトフォルダの .env.local ファイルに取得した値を設定する。",
+    title: "接続情報（URL と API Key）を取得する",
+    description: "アプリが Supabase に接続するための2つの値を取得する。",
     actions: [
-      { label: "devstudio フォルダ内の .env.local をテキストエディタで開く", type: "text", value: "" },
-      { label: "NEXT_PUBLIC_SUPABASE_URL=（あなたの Supabase URL）", type: "copy", value: "NEXT_PUBLIC_SUPABASE_URL=https://xxxxxx.supabase.co" },
-      { label: "NEXT_PUBLIC_SUPABASE_ANON_KEY=（コピーした anon キー）", type: "copy", value: "NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ..." },
+      { label: "左サイドバーの一番下にある「Settings」（歯車アイコン）をクリック", type: "text", value: "" },
+      { label: "左メニューの「API」をクリック（「Data API」と書かれている場合もある）", type: "text", value: "" },
+      { label: "「Project URL」の右にある「Copy」ボタンをクリック → これが NEXT_PUBLIC_SUPABASE_URL として使う値", type: "text", value: "" },
+      { label: "少し下にスクロールして「Project API keys」セクションを探す", type: "text", value: "" },
+      { label: "「anon」「public」と書かれた行の右にある「Copy」ボタンをクリック → これが NEXT_PUBLIC_SUPABASE_ANON_KEY として使う値", type: "text", value: "" },
+      { label: "2つの値をどこかにメモしておく（次のステップで使う）", type: "text", value: "" },
     ],
   },
   {
     number: 6,
-    title: "開発サーバーを起動する",
-    description: "ターミナルでアプリを起動する。",
+    title: ".env.local に設定を書き込む",
+    description: "取得した URL と API Key をアプリの設定ファイルに書き込む。",
     actions: [
-      { label: "ターミナルアプリを開く（Dock の黒いアイコン）", type: "text", value: "" },
-      { label: "以下のコマンドをコピーして実行", type: "copy", value: "cd ~/claude_setup/devstudio && npm run dev" },
-      { label: "「Ready in〜」と出たら起動完了", type: "text", value: "" },
+      { label: "Finder を開いて、画面上部メニューの「移動」→「ホーム」をクリック", type: "text", value: "" },
+      { label: "隠しファイルを表示する：キーボードで Command + Shift + .（ピリオド）を押す。.env.local が見えるようになる", type: "text", value: "" },
+      { label: "claude_setup → devstudio フォルダの中の「.env.local」ファイルを右クリック → 「このアプリケーションで開く」→「テキストエディット」", type: "text", value: "" },
+      { label: "ファイルの中に以下の3行が並んでいる。NEXT_PUBLIC_SUPABASE_URL= の後ろ（= の右側）に手順5でコピーした URL を貼り付ける", type: "text", value: "" },
+      { label: "NEXT_PUBLIC_SUPABASE_ANON_KEY= の後ろに手順5でコピーした anon キーを貼り付ける", type: "text", value: "" },
+      { label: "GEMINI_API_KEY はそのままでOK（すでに設定済み）", type: "text", value: "" },
+      { label: "Command + S で保存してファイルを閉じる", type: "text", value: "" },
     ],
   },
   {
     number: 7,
-    title: "ユーザーを登録する",
-    description: "ログインするためのアカウントを Supabase で作成する。",
+    title: "開発サーバーを起動する",
+    description: "ターミナルでアプリを起動する。",
     actions: [
-      { label: "Supabase の Authentication → Users を開く", type: "link", value: "https://supabase.com/dashboard" },
-      { label: "右上「Add user」→「Create new user」をクリック", type: "text", value: "" },
-      { label: "メールアドレスとパスワードを自分で決めて入力して「Create user」", type: "text", value: "" },
+      { label: "ターミナルを開く（Dock の黒いアイコン、または Spotlight で「ターミナル」と検索）", type: "text", value: "" },
+      { label: "以下のコマンドをコピーしてターミナルに貼り付け、Enter を押す", type: "copy", value: "cd ~/claude_setup/devstudio && npm run dev --webpack" },
+      { label: "「▲ Next.js ... Ready in ...ms」と表示されたら起動完了", type: "text", value: "" },
+      { label: "このターミナルは起動中は閉じない（閉じるとアプリが止まる）", type: "text", value: "" },
     ],
   },
   {
     number: 8,
+    title: "ユーザーアカウントを作成する",
+    description: "アプリにログインするための自分のアカウントを Supabase で作成する。",
+    actions: [
+      { label: "Supabase ダッシュボードに戻り、左サイドバーの「Authentication」（人型アイコン）をクリック", type: "text", value: "" },
+      { label: "上部メニューの「Users」タブをクリック", type: "text", value: "" },
+      { label: "右上の「Add user」ボタンをクリック → 「Create new user」を選択", type: "text", value: "" },
+      { label: "「Email」に使いたいメールアドレスを入力（実在しなくてもOK。例: me@example.com）", type: "text", value: "" },
+      { label: "「Password」に好きなパスワードを入力", type: "text", value: "" },
+      { label: "「Create user」ボタンをクリック。リストにユーザーが追加されれば完了", type: "text", value: "" },
+    ],
+  },
+  {
+    number: 9,
     title: "ログインして使い始める",
     description: "ブラウザでアプリを開いて、作成したアカウントでログインする。",
     actions: [
-      { label: "ログイン画面を開く", type: "link", value: "http://localhost:3000/auth/login" },
-      { label: "手順7で設定したメールとパスワードを入力してログイン", type: "text", value: "" },
+      { label: "アプリのログイン画面を開く", type: "link", value: "http://localhost:3000/auth/login" },
+      { label: "手順8で設定したメールアドレスとパスワードを入力", type: "text", value: "" },
+      { label: "「ログイン」ボタンをクリック → アプリのトップ画面が表示されれば設定完了！", type: "text", value: "" },
     ],
   },
 ];
@@ -240,8 +274,8 @@ export function SetupGuideButton() {
               style={{ borderBottom: "1.5px solid #E2D9F3", background: "linear-gradient(135deg, #F0EDF8 0%, white 100%)" }}
             >
               <div>
-                <h2 className="font-black text-base" style={{ color: "#3D2B6B" }}>🚀 アプリ起動手順</h2>
-                <p className="text-xs mt-0.5" style={{ color: "#8B82A0" }}>はじめて動かすときの全ステップ</p>
+                <h2 className="font-black text-base" style={{ color: "#3D2B6B" }}>🚀 セットアップ手順</h2>
+                <p className="text-xs mt-0.5" style={{ color: "#8B82A0" }}>Supabase設定〜ログインまでの全ステップ</p>
               </div>
               <button
                 onClick={() => setOpen(false)}

@@ -306,6 +306,7 @@ export default function ProjectPage() {
     setPendingTransition(false);
     setCompleting(true);
     setError(null);
+    const wasKou = activeAgent === 3;
     try {
       const res = await fetch(`/api/projects/${project.id}/complete`, {
         method: "POST",
@@ -318,6 +319,32 @@ export default function ProjectPage() {
         setProject(updated);
         const next = activeAgent < 5 ? ((activeAgent + 1) as AgentId) : activeAgent;
         switchAgent(next, updated);
+        // コウ（実装フェーズ）完了時に自動デプロイ
+        if (wasKou) {
+          setDeploying(true);
+          setDeployError(null);
+          try {
+            const deployRes = await fetch("/api/deploy", { method: "POST" });
+            const deployJson = await deployRes.json() as { success: boolean; url?: string; error?: string };
+            if (deployJson.success && deployJson.url) {
+              setDeployUrl(deployJson.url);
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: `deploy_${Date.now()}`,
+                  role: "assistant",
+                  content: `実装が完了しました！Vercelへのデプロイも完了しています。\nここで確認できます: ${deployJson.url}`,
+                  timestamp: Date.now(),
+                },
+              ]);
+            } else {
+              setDeployError(deployJson.error ?? "デプロイに失敗しました");
+            }
+          } catch {
+            setDeployError("デプロイ中にエラーが発生しました");
+          }
+          setDeploying(false);
+        }
       } else {
         setError(json.error ?? "フェーズの完了に失敗しました");
       }

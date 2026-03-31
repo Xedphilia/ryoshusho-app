@@ -247,6 +247,9 @@ export default function ProjectPage() {
   const [completing, setCompleting] = useState(false);
   const [sendingElapsed, setSendingElapsed] = useState(0);
   const [pendingTransition, setPendingTransition] = useState(false);
+  const [deploying, setDeploying] = useState(false);
+  const [deployUrl, setDeployUrl] = useState<string | null>(null);
+  const [deployError, setDeployError] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isComposing, setIsComposing] = useState(false);
@@ -401,6 +404,23 @@ export default function ProjectPage() {
     setSendingElapsed(0);
   }
 
+  async function handleDeploy() {
+    setDeploying(true);
+    setDeployError(null);
+    try {
+      const res = await fetch("/api/deploy", { method: "POST" });
+      const json = await res.json() as { success: boolean; url?: string; error?: string };
+      if (json.success && json.url) {
+        setDeployUrl(json.url);
+      } else {
+        setDeployError(json.error ?? "デプロイに失敗しました");
+      }
+    } catch {
+      setDeployError("通信エラーが発生しました");
+    }
+    setDeploying(false);
+  }
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (isComposing) return;
     if (e.key === "Enter" && e.shiftKey) {
@@ -420,6 +440,9 @@ export default function ProjectPage() {
   const agent = getAgent(activeAgent);
   const currentSession = project.sessions.find((s) => s.agentId === activeAgent);
   const isCompleted = currentSession?.completed ?? false;
+  const allPhasesCompleted = [1, 2, 3, 4, 5].every(
+    (id) => project.sessions.some((s) => s.agentId === id && s.completed)
+  );
   const hasEnoughMessages = messages.filter((m) => m.role === "user").length >= 2;
 
   // 進捗バーのステータステキスト
@@ -739,6 +762,45 @@ export default function ProjectPage() {
         className="relative px-4 py-3"
         style={{ backgroundColor: "white", borderTop: `2px solid ${agent.borderColor}` }}
       >
+        {/* Vercelデプロイセクション（全フェーズ完了後） */}
+        {allPhasesCompleted && (
+          <div
+            className="w-full mb-3 p-4 rounded-xl"
+            style={{ background: "linear-gradient(135deg, #F0FDF4, #ECFDF5)", border: "2px solid #86EFAC" }}
+          >
+            {deployUrl ? (
+              <div className="space-y-2">
+                <p className="text-sm font-black" style={{ color: "#15803D" }}>🎉 デプロイ完了！公開URLはこちら：</p>
+                <a
+                  href={deployUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block text-sm font-mono underline break-all transition-opacity hover:opacity-70"
+                  style={{ color: "#1D4ED8" }}
+                >
+                  {deployUrl}
+                </a>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black" style={{ color: "#15803D" }}>🚀 全フェーズ完了！</p>
+                  <p className="text-xs mt-0.5" style={{ color: "#16A34A" }}>Vercelにデプロイしてアプリを公開しましょう</p>
+                  {deployError && <p className="text-xs mt-1 text-red-500">{deployError}</p>}
+                </div>
+                <button
+                  onClick={() => void handleDeploy()}
+                  disabled={deploying}
+                  className="shrink-0 px-4 py-2 rounded-xl text-sm font-black transition-all active:scale-95 disabled:opacity-60"
+                  style={{ backgroundColor: "#16A34A", color: "white" }}
+                >
+                  {deploying ? "デプロイ中…" : "Vercelにデプロイ"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* フェーズ完了ボタン（手動フォールバック） */}
         {activeAgent > 0 && !isCompleted && hasEnoughMessages && !pendingTransition && (
           <button

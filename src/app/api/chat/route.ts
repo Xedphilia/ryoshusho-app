@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export const maxDuration = 300;
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { spawn } from "child_process";
 import { getProject, updateProject } from "@/lib/projects";
 import { getAgent } from "@/lib/agents";
 import { Message, AgentId, Project } from "@/lib/types";
 import { randomUUID } from "crypto";
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY ?? "");
 
 interface ChatRequest {
   projectId: string;
@@ -144,12 +142,41 @@ function buildUserMessage(agentId: AgentId, history: Message[], userMessage: str
 }
 
 async function callClaudeCode(systemPrompt: string, userMessage: string): Promise<string> {
-  const model = genAI.getGenerativeModel({
-    model: "gemini-2.0-flash",
-    systemInstruction: systemPrompt,
+  return new Promise((resolve, reject) => {
+    const child = spawn("claude", [
+      "-p",
+      "--output-format", "text",
+      "--model", "sonnet",
+      "--system-prompt", systemPrompt,
+      userMessage,
+    ], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    child.stdin.end();
+
+    let stdout = "";
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error("タイムアウト: Claude の応答が10分を超えました"));
+    }, 600000);
+
+    child.stdout.on("data", (data: Buffer) => {
+      stdout += data.toString();
+    });
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      if (code !== 0 && stdout.trim() === "") {
+        reject(new Error(`Claude が終了しました (code ${code})`));
+      } else {
+        resolve(stdout.trim());
+      }
+    });
+    child.on("error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
   });
-  const result = await model.generateContent(userMessage);
-  return result.response.text();
 }
 
 export async function POST(req: NextRequest) {

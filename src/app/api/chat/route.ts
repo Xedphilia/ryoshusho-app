@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const maxDuration = 300;
 import { spawn } from "child_process";
+import { readFileSync, unlinkSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { getProject, updateProject } from "@/lib/projects";
 import { getAgent } from "@/lib/agents";
 import { Message, AgentId, Project } from "@/lib/types";
@@ -147,6 +150,7 @@ async function callClaudeCode(systemPrompt: string, userMessage: string): Promis
       "-p",
       "--output-format", "text",
       "--model", "sonnet",
+      "--permission-mode", "bypassPermissions",
       "--system-prompt", systemPrompt,
       userMessage,
     ], {
@@ -172,6 +176,50 @@ async function callClaudeCode(systemPrompt: string, userMessage: string): Promis
         resolve(stdout.trim());
       }
     });
+    child.on("error", (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+  });
+}
+
+async function callCodex(systemPrompt: string, userMessage: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const tmpFile = join(tmpdir(), `codex_out_${Date.now()}.txt`);
+    const combinedPrompt = `${systemPrompt}\n\n---\n\n${userMessage}`;
+
+    const child = spawn("codex", [
+      "exec",
+      "-s", "workspace-write",
+      "--ephemeral",
+      "-o", tmpFile,
+      combinedPrompt,
+    ], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    child.stdin.end();
+
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error("タイムアウト: Codexの応答が10分を超えました"));
+    }, 600000);
+
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      try {
+        const output = readFileSync(tmpFile, "utf-8").trim();
+        try { unlinkSync(tmpFile); } catch { /* ignore */ }
+        if (output) {
+          resolve(output);
+        } else {
+          reject(new Error(`Codexが終了しました (code ${code})`));
+        }
+      } catch {
+        reject(new Error("Codexの出力を読み取れませんでした"));
+      }
+    });
+
     child.on("error", (err) => {
       clearTimeout(timeout);
       reject(err);
@@ -207,7 +255,10 @@ export async function POST(req: NextRequest) {
 
     const systemPrompt = buildSystemPrompt(agentId, projectContext, previousContext);
     const userMsg2 = buildUserMessage(agentId, session.messages, message);
-    const reply = await callClaudeCode(systemPrompt, userMsg2);
+    // ミオ（agentId=4）はCodexで動作確認・バグ修正を自律実行
+    const reply = agentId === 4
+      ? await callCodex(systemPrompt, userMsg2)
+      : await callClaudeCode(systemPrompt, userMsg2);
 
     const userMsg: Message = {
       id: randomUUID(),

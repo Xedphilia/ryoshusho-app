@@ -15,6 +15,15 @@ body {
     sans-serif;
 }
 
+/* iOS タップ遅延・ダブルタップズームを無効化 */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+button, a, input, select, textarea, [role="button"] {
+  touch-action: manipulation;
+  cursor: pointer;
+}
+
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: #f0ebfa; border-radius: 10px; }
 ::-webkit-scrollbar-thumb { background: #c4b5e8; border-radius: 10px; }

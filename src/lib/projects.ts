@@ -12,13 +12,19 @@ function ensureDataDir() {
 
 export function loadProjects(): Project[] {
   ensureDataDir();
-  const raw = fs.readFileSync(PROJECTS_FILE, "utf-8");
-  return JSON.parse(raw) as Project[];
+  try {
+    const raw = fs.readFileSync(PROJECTS_FILE, "utf-8");
+    return JSON.parse(raw) as Project[];
+  } catch {
+    return [];
+  }
 }
 
 export function saveProjects(projects: Project[]) {
   ensureDataDir();
-  fs.writeFileSync(PROJECTS_FILE, JSON.stringify(projects, null, 2));
+  const tmpFile = PROJECTS_FILE + ".tmp";
+  fs.writeFileSync(tmpFile, JSON.stringify(projects, null, 2));
+  fs.renameSync(tmpFile, PROJECTS_FILE);
 }
 
 export function getProject(id: string): Project | undefined {

@@ -1,0 +1,60 @@
+name: Claude Code Auto-Fix
+
+# CIが失敗した時 or @claudeメンションで自動修復
+on:
+  # PRコメントで @claude と書くと起動
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  # Issueで @claude と書くと起動
+  issues:
+    types: [opened, assigned]
+  # CI失敗時に自動起動
+  workflow_run:
+    workflows: ["*"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  # ① @claude メンション → PRの修正・実装
+  claude-on-mention:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'issues' && contains(github.event.issue.body, '@claude'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # CLAUDE.md があれば自動でプロジェクトルールを参照
+          claude_args: "--max-turns 15"
+
+  # ② CI失敗時 → 自動修復試行
+  claude-autofix-on-failure:
+    if: |
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.pull_requests[0] != null
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            CIが失敗しました。ワークフロー「${{ github.event.workflow_run.name }}」が失敗しています。
+            PR #${{ github.event.workflow_run.pull_requests[0].number }} のコードを確認し、
+            テストが通るように修正してコミットしてください。
+            修正後、PRにコメントで修正内容を報告してください。
+          claude_args: "--max-turns 20 --model claude-sonnet-4-6"

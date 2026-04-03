@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { OcrResult, PaymentMethod } from '@/lib/supabase/types'
 
+export const maxDuration = 60
+
 interface GeminiOcrResponse {
   date: string | null
   amount: number | null
   store_name: string | null
-  item_name: string | null
+  item_names: string[]
   payment_method: 'cash' | 'card'
   card_info: string | null
 }
@@ -42,7 +44,7 @@ export async function POST(request: NextRequest) {
 - date: 日付（YYYY-MM-DD形式）
 - amount: 金額（整数、円単位）
 - store_name: 店名・会社名
-- item_name: 品名・商品名・サービス名
+- item_names: 品名・商品名の配列（1品目ずつ別の要素として列挙。スーパーのレシートなら全商品名を配列で列挙。空配列にしない）
 - payment_method: 支払方法（現金なら"cash"、カードなら"card"）
 - card_info: カード情報（カード種別と末尾番号、例: "JCB 1139"。現金の場合はnull）${storeNameHint}
 
@@ -56,15 +58,15 @@ export async function POST(request: NextRequest) {
   "date": "YYYY-MM-DD" または null,
   "amount": 数値 または null,
   "store_name": "店名" または null,
-  "item_name": "品名" または null,
+  "item_names": ["品名1", "品名2", "品名3"],
   "payment_method": "cash" または "card",
   "card_info": "カード情報" または null
 }
 
 複数枚の場合の形式:
 [
-  { "date": ..., "amount": ..., "store_name": ..., "item_name": ..., "payment_method": ..., "card_info": ... },
-  { "date": ..., "amount": ..., "store_name": ..., "item_name": ..., "payment_method": ..., "card_info": ... }
+  { "date": ..., "amount": ..., "store_name": ..., "item_names": [...], "payment_method": ..., "card_info": ... },
+  { "date": ..., "amount": ..., "store_name": ..., "item_names": [...], "payment_method": ..., "card_info": ... }
 ]`
 
   const geminiBody = {
@@ -139,7 +141,9 @@ export async function POST(request: NextRequest) {
       date: parsed.date,
       amount: typeof parsed.amount === 'number' ? parsed.amount : null,
       store_name: parsed.store_name,
-      item_name: parsed.item_name,
+      item_name: Array.isArray(parsed.item_names) && parsed.item_names.length > 0
+        ? parsed.item_names.join(', ')
+        : null,
       payment_method: (['cash', 'card'].includes(parsed.payment_method)
         ? parsed.payment_method
         : 'cash') as PaymentMethod,

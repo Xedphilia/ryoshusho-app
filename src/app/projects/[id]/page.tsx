@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Send, ArrowLeft, CheckCircle2, ChevronRight, AlertCircle, ArrowRight } from "lucide-react";
+import { Send, X, ArrowLeft, CheckCircle2, ChevronRight, AlertCircle, ArrowRight, Paperclip, ImageIcon } from "lucide-react";
 import { Project, Message, AgentId } from "@/lib/types";
 import { AGENTS, getAgent } from "@/lib/agents";
 import AgentAvatar from "@/components/agents/AgentAvatar";
@@ -221,6 +221,34 @@ function getProgressLabel(agentId: number, elapsed: number): string {
   return [...stages].reverse().find((s) => elapsed >= s.after)?.label ?? stages[0].label;
 }
 
+// 利用可能なスキル一覧（UIに表示）
+const AVAILABLE_SKILLS = [
+  // 要件定義（ルカ）
+  { id: "blueprint",                   label: "設計計画",      agents: [1] },
+  // UI設計（レン）
+  { id: "landing-page-design",         label: "LP設計",        agents: [2] },
+  { id: "frontend-patterns",           label: "フロント設計",  agents: [2, 3] },
+  { id: "design-system",               label: "デザインシステム", agents: [2] },
+  // 実装（コウ）
+  { id: "vercel-react-best-practices", label: "React最適化",   agents: [2, 3] },
+  { id: "nextjs-turbopack",            label: "Next.js",        agents: [2, 3] },
+  { id: "api-design",                  label: "API設計",        agents: [3] },
+  { id: "backend-patterns",            label: "バックエンド",   agents: [3] },
+  { id: "database-migrations",         label: "DBマイグレ",     agents: [3] },
+  { id: "deployment-patterns",         label: "デプロイ設計",   agents: [3, 5] },
+  { id: "data-scraper-agent",          label: "Webクローン",    agents: [3] },
+  { id: "vercel-composition-patterns", label: "Vercel構成",     agents: [3] },
+  // QA・バグ修正（ミオ）
+  { id: "webapp-testing",              label: "Webテスト",      agents: [4] },
+  { id: "verification-loop",           label: "検証ループ",     agents: [4] },
+  { id: "improvement-advisor",         label: "改善提案",       agents: [4, 6] },
+  // 最終チェック（ハル）
+  { id: "deploy-to-vercel",            label: "Vercelデプロイ", agents: [3, 5] },
+  { id: "security-review",             label: "セキュリティ",   agents: [3, 5] },
+  // 修正（カイ）
+  { id: "bug-fixer",                   label: "バグ修正",       agents: [4, 6] },
+] as const;
+
 // AIレスポンスに含まれる「次に進む」トリガーフレーズ
 const TRANSITION_PHRASES = [
   "次のフェーズ", "次のエージェント", "次に進み", "引き継ぎ", "移行します",
@@ -253,21 +281,29 @@ export default function ProjectPage() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isComposing, setIsComposing] = useState(false);
+  const [attachedImage, setAttachedImage] = useState<string | null>(null);
+  const [activeSkills, setActiveSkills] = useState<string[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const messagePollerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  const fetchProject = useCallback(async () => {
+  const fetchProject = useCallback(async (redirectIfMissing = false) => {
     const res = await fetch("/api/projects");
     const json = await res.json() as { success: boolean; data: Project[] };
     if (!json.success) return;
     const p = json.data.find((x) => x.id === id);
-    if (!p) { router.push("/projects"); return; }
+    if (!p) {
+      if (redirectIfMissing) router.push("/projects");
+      return;
+    }
     return p;
   }, [id, router]);
 
   useEffect(() => {
-    void fetchProject().then((p) => {
+    void fetchProject(true).then((p) => {
       if (!p) return;
       setProject(p);
       const initAgent = p.currentAgent;
@@ -377,15 +413,32 @@ export default function ProjectPage() {
     setSendingElapsed(0);
     setError(null);
     setInput("");
+    const capturedImage = attachedImage;
+    setAttachedImage(null);
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     elapsedTimerRef.current = setInterval(() => {
       setSendingElapsed((prev) => prev + 1);
     }, 1000);
 
+    // callbackで追記されるメッセージ（Claude Code動作確認結果）をポーリングで取得
+    const currentMsgCount = project.sessions.find((s) => s.agentId === activeAgent)?.messages.length ?? 0;
+    messagePollerRef.current = setInterval(async () => {
+      const updated = await fetchProject();
+      if (!updated) return;
+      const updatedSession = updated.sessions.find((s) => s.agentId === activeAgent);
+      if (!updatedSession) return;
+      if (updatedSession.messages.length > currentMsgCount) {
+        setMessages(updatedSession.messages);
+      }
+    }, 5000);
+
     const tempUser: Message = {
       id: `tmp_${Date.now()}`,
       role: "user",
       content: userText,
+      imageUrl: capturedImage ?? undefined,
       timestamp: Date.now(),
     };
     setMessages((prev) => [...prev, tempUser]);
@@ -394,7 +447,14 @@ export default function ProjectPage() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectId: project.id, agentId: activeAgent, message: userText }),
+        body: JSON.stringify({
+          projectId: project.id,
+          agentId: activeAgent,
+          message: userText,
+          imageBase64: capturedImage ?? undefined,
+          activeSkills,
+        }),
+        signal: abortController.signal,
       });
       const json = await res.json() as {
         success: boolean;
@@ -422,13 +482,23 @@ export default function ProjectPage() {
         setMessages((prev) => prev.filter((m) => m.id !== tempUser.id));
         setError(json.error ?? "送信に失敗しました");
       }
-    } catch {
+    } catch (e) {
       setMessages((prev) => prev.filter((m) => m.id !== tempUser.id));
-      setError("通信エラーが発生しました");
+      if (e instanceof Error && e.name === "AbortError") {
+        setInput(userText);
+      } else {
+        setError("通信エラーが発生しました");
+      }
     }
+    abortControllerRef.current = null;
     if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
+    if (messagePollerRef.current) clearInterval(messagePollerRef.current);
     setSending(false);
     setSendingElapsed(0);
+  }
+
+  function handleCancel() {
+    abortControllerRef.current?.abort();
   }
 
   async function handleDeploy() {
@@ -447,6 +517,37 @@ export default function ProjectPage() {
     }
     setDeploying(false);
   }
+
+  const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = Array.from(e.clipboardData.items);
+    const imageItem = items.find((item) => item.type.startsWith("image/"));
+    if (!imageItem) return;
+    e.preventDefault();
+    const file = imageItem.getAsFile();
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      if (typeof ev.target?.result === "string") setAttachedImage(ev.target.result);
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      if (typeof ev.target?.result === "string") setAttachedImage(ev.target.result);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
+  }, []);
+
+  const toggleSkill = useCallback((skillId: string) => {
+    setActiveSkills((prev) =>
+      prev.includes(skillId) ? prev.filter((s) => s !== skillId) : [...prev, skillId]
+    );
+  }, []);
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (isComposing) return;
@@ -658,10 +759,21 @@ export default function ProjectPage() {
                     }
               }
             >
-              {msg.role === "assistant"
-                ? <MessageContent content={msg.content} />
-                : <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
-              }
+              {msg.role === "assistant" ? (
+                <MessageContent content={msg.content} />
+              ) : (
+                <>
+                  {msg.imageUrl && (
+                    <img
+                      src={msg.imageUrl}
+                      alt="添付画像"
+                      className="max-w-full rounded-xl mb-2 border"
+                      style={{ maxHeight: "300px", objectFit: "contain", borderColor: "rgba(255,255,255,0.3)" }}
+                    />
+                  )}
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
+                </>
+              )}
             </div>
           </div>
         ))}
@@ -860,12 +972,63 @@ export default function ProjectPage() {
           </button>
         )}
 
+        {/* スキルパネル */}
+        {(() => {
+          const visibleSkills = AVAILABLE_SKILLS.filter((s) => s.agents.includes(activeAgent as never));
+          if (visibleSkills.length === 0) return null;
+          return (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {visibleSkills.map((skill) => {
+                const on = activeSkills.includes(skill.id);
+                return (
+                  <button
+                    key={skill.id}
+                    onClick={() => toggleSkill(skill.id)}
+                    className="px-2.5 py-1 rounded-full text-[10px] font-bold transition-all border"
+                    style={{
+                      backgroundColor: on ? agent.color : agent.bgColor,
+                      color: on ? "white" : agent.color,
+                      borderColor: on ? agent.color : agent.borderColor,
+                    }}
+                  >
+                    {on ? "✓ " : ""}{skill.label}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })()}
+
+        {/* 画像プレビュー */}
+        {attachedImage && (
+          <div className="relative mb-2 inline-block">
+            <img src={attachedImage} alt="添付画像プレビュー" className="h-20 rounded-xl border object-contain" style={{ borderColor: agent.borderColor }} />
+            <button
+              onClick={() => setAttachedImage(null)}
+              className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px]"
+              style={{ backgroundColor: "#EF4444" }}
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        {/* ファイル入力（hidden） */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleFileSelect}
+        />
+
         <div className="flex gap-2 items-end">
           <textarea
             ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             onCompositionStart={() => setIsComposing(true)}
             onCompositionEnd={() => setIsComposing(false)}
             placeholder={
@@ -884,13 +1047,33 @@ export default function ProjectPage() {
             }}
           />
           <button
-            onClick={() => void handleSend()}
-            disabled={!input.trim() || sending}
-            className="p-3 rounded-2xl text-white transition-all hover:shadow-lg hover:-translate-y-0.5 disabled:opacity-40 shrink-0"
-            style={{ background: `linear-gradient(135deg, ${agent.color}, ${agent.color}CC)` }}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={sending}
+            title="画像・スクリーンショットを添付（またはテキストエリアに直接ペースト）"
+            className="p-3 rounded-2xl transition-all hover:shadow-md shrink-0 disabled:opacity-40"
+            style={{ backgroundColor: attachedImage ? agent.color : agent.bgColor, color: attachedImage ? "white" : agent.color, border: `1.5px solid ${agent.borderColor}` }}
           >
-            <Send size={18} />
+            {attachedImage ? <ImageIcon size={18} /> : <Paperclip size={18} />}
           </button>
+          {sending ? (
+            <button
+              onClick={handleCancel}
+              title="キャンセルして入力し直す"
+              className="p-3 rounded-2xl text-white transition-all hover:shadow-lg hover:-translate-y-0.5 shrink-0"
+              style={{ background: "linear-gradient(135deg, #EF4444, #DC2626)" }}
+            >
+              <X size={18} />
+            </button>
+          ) : (
+            <button
+              onClick={() => void handleSend()}
+              disabled={!input.trim() && !attachedImage}
+              className="p-3 rounded-2xl text-white transition-all hover:shadow-lg hover:-translate-y-0.5 disabled:opacity-40 shrink-0"
+              style={{ background: `linear-gradient(135deg, ${agent.color}, ${agent.color}CC)` }}
+            >
+              <Send size={18} />
+            </button>
+          )}
         </div>
         <p className="text-[10px] mt-1 text-center" style={{ color: "#B0A8C0" }}>
           Enter で改行 / Shift+Enter で送信

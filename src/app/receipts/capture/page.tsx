@@ -779,12 +779,9 @@ function ConfirmScreen({
                   />
                 </OcrField>
                 <OcrField label="品名" className="col-span-2">
-                  <input
-                    type="text"
+                  <ItemNameList
                     value={ocr.item_name ?? ''}
-                    onChange={(e) => onUpdateOcr(currentIndex, 'item_name', e.target.value || null)}
-                    className="w-full px-2 py-1.5 rounded-lg text-sm outline-none"
-                    style={{ border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+                    onChange={(v) => onUpdateOcr(currentIndex, 'item_name', v || null)}
                   />
                 </OcrField>
                 <OcrField label="用途">
@@ -938,7 +935,6 @@ function ConfirmScreen({
                   { label: '日付', field: 'date', type: 'date', span: 1 },
                   { label: '金額（円）', field: 'amount', type: 'number', span: 1 },
                   { label: '店名', field: 'store_name', type: 'text', span: 2 },
-                  { label: '品名', field: 'item_name', type: 'text', span: 2 },
                 ] as const).map(({ label, field, type, span }) => (
                   <div key={field} className={span === 2 ? 'col-span-2' : ''}>
                     <p className="text-xs mb-0.5" style={{ color: 'rgba(255,255,255,0.4)' }}>{label}</p>
@@ -946,7 +942,7 @@ function ConfirmScreen({
                       type={type}
                       value={field === 'amount'
                         ? (zOcr.amount ?? '')
-                        : (zOcr[field as 'date' | 'store_name' | 'item_name'] ?? '')}
+                        : (zOcr[field as 'date' | 'store_name'] ?? '')}
                       onChange={(e) => {
                         const val = field === 'amount'
                           ? (parseInt(e.target.value) || null)
@@ -958,6 +954,14 @@ function ConfirmScreen({
                     />
                   </div>
                 ))}
+                <div className="col-span-2">
+                  <p className="text-xs mb-0.5" style={{ color: 'rgba(255,255,255,0.4)' }}>品名</p>
+                  <ItemNameList
+                    value={zOcr.item_name ?? ''}
+                    onChange={(v) => onUpdateOcr(zoomIndex, 'item_name', v || null)}
+                    dark
+                  />
+                </div>
                 {zOcr.is_flagged && (
                   <div className="col-span-2 flex items-start gap-2 px-2 py-1.5 rounded-lg" style={{ background: '#7C3317' }}>
                     <AlertCircle size={13} className="text-amber-400 flex-shrink-0 mt-0.5" />
@@ -1061,6 +1065,76 @@ function PurposeCombobox({
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// ── 品名リスト編集 ──────────────────────────────────────
+function ItemNameList({ value, onChange, dark = false }: { value: string; onChange: (v: string) => void; dark?: boolean }) {
+  // 末尾の空欄を維持するための内部state
+  const [localItems, setLocalItems] = useState<string[]>(() => {
+    const parsed = value ? value.split(',').map((s) => s.trim()) : []
+    return parsed.length > 0 ? parsed : ['']
+  })
+
+  useEffect(() => {
+    const parsed = value ? value.split(',').map((s) => s.trim()) : ['']
+    setLocalItems(parsed.length > 0 ? parsed : [''])
+  }, [value])
+
+  function handleChange(index: number, val: string) {
+    const next = [...localItems]
+    next[index] = val
+    setLocalItems(next)
+    onChange(next.filter(Boolean).join(', '))
+  }
+
+  function handleRemove(index: number) {
+    const next = localItems.filter((_, i) => i !== index)
+    const result = next.length > 0 ? next : ['']
+    setLocalItems(result)
+    onChange(result.filter(Boolean).join(', '))
+  }
+
+  function handleAdd() {
+    setLocalItems((prev) => [...prev, ''])
+  }
+
+  return (
+    <div className="space-y-1">
+      {localItems.map((item, i) => (
+        <div key={i} className="flex items-center gap-1">
+          <input
+            type="text"
+            value={item}
+            onChange={(e) => handleChange(i, e.target.value)}
+            placeholder={`品名 ${i + 1}`}
+            className="flex-1 px-2 py-1.5 rounded-lg text-sm outline-none"
+            style={dark
+              ? { background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)' }
+              : { border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+          />
+          {localItems.length > 1 && (
+            <button
+              type="button"
+              onClick={() => handleRemove(i)}
+              className="p-1 rounded-lg flex-shrink-0"
+              style={{ color: 'var(--text-muted)' }}
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      ))}
+      <button
+        type="button"
+        onClick={handleAdd}
+        className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg"
+        style={{ color: '#7C5CBF', border: '1px dashed #7C5CBF' }}
+      >
+        <Plus size={12} />
+        品名を追加
+      </button>
     </div>
   )
 }

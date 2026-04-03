@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const maxDuration = 300;
 import { spawn } from "child_process";
+import { readFileSync, unlinkSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { getProject, updateProject } from "@/lib/projects";
 import { getAgent } from "@/lib/agents";
 import { AgentId, AgentSession } from "@/lib/types";
@@ -59,6 +62,64 @@ ${convo}`;
   });
 }
 
+async function runCodexReview(session: AgentSession, projectName: string): Promise<string> {
+  const agent = getAgent(session.agentId);
+  const convo = session.messages
+    .map((m) => `${m.role === "user" ? "ユーザー" : agent.name}: ${m.content}`)
+    .join("\n");
+
+  const reviewPrompt = `あなたはコードレビュアーです。以下はコウ（実装担当）がプロジェクト「${projectName}」について行ったコーディング会話です。
+この会話をもとに、実装されたコードのレビューを行ってください。
+
+【レビュー観点】
+- バグ・ロジックエラーの可能性
+- セキュリティ上の問題点
+- パフォーマンスの懸念
+- 改善提案（優先度高・中・低で分類）
+
+【コウの実装会話】
+${convo}
+
+日本語で簡潔にレビュー結果を返してください。`;
+
+  return new Promise((resolve) => {
+    const tmpFile = join(tmpdir(), `codex_review_${Date.now()}.txt`);
+    const child = spawn("codex", [
+      "exec",
+      "--oss",
+      "--local-provider", "ollama",
+      "--profile", "review",
+      "--ephemeral",
+      "--skip-git-repo-check",
+      "-o", tmpFile,
+      reviewPrompt,
+    ], { stdio: ["pipe", "pipe", "pipe"] });
+
+    child.stdin.end();
+
+    const timeout = setTimeout(() => {
+      child.kill();
+      resolve("（Codexレビュータイムアウト）");
+    }, 300000);
+
+    child.on("close", () => {
+      clearTimeout(timeout);
+      try {
+        const output = readFileSync(tmpFile, "utf-8").trim();
+        try { unlinkSync(tmpFile); } catch { /* ignore */ }
+        resolve(output || "（Codexレビュー結果なし）");
+      } catch {
+        resolve("（Codexレビュー読み取りエラー）");
+      }
+    });
+
+    child.on("error", () => {
+      clearTimeout(timeout);
+      resolve("（Codexレビュー実行エラー）");
+    });
+  });
+}
+
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -102,6 +163,18 @@ export async function POST(
       );
       updateProject(id, { sessions });
     });
+
+    // コウ（実装）完了時：Codex + Ollamaでコードレビューをバックグラウンド実行
+    if (agentId === 3) {
+      void runCodexReview(currentSession, project.name).then((codexReview) => {
+        const latest = getProject(id);
+        if (!latest) return;
+        const sessions = latest.sessions.map((s) =>
+          s.agentId === 3 ? { ...s, codexReview } : s
+        );
+        updateProject(id, { sessions });
+      });
+    }
 
     return NextResponse.json({ success: true, data: updated });
   } catch (error: unknown) {

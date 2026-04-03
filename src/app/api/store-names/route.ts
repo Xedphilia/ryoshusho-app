@@ -4,15 +4,10 @@ import { createClient } from '@/lib/supabase/server'
 // GET /api/store-names
 export async function GET() {
   const supabase = await createClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
-  }
 
   const { data, error } = await supabase
     .from('store_names')
     .select('*')
-    .eq('user_id', user.id)
     .order('name', { ascending: true })
 
   if (error) {
@@ -25,10 +20,6 @@ export async function GET() {
 // POST /api/store-names
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
-  }
 
   const { name }: { name: string } = await request.json()
   if (!name?.trim()) {
@@ -37,7 +28,7 @@ export async function POST(request: NextRequest) {
 
   const { data, error } = await supabase
     .from('store_names')
-    .upsert({ user_id: user.id, name: name.trim() }, { onConflict: 'user_id,name' })
+    .upsert({ name: name.trim() }, { onConflict: 'name' })
     .select()
     .single()
 

@@ -15,7 +15,8 @@ export async function createClient() {
         setAll(cookiesToSet) {
           try {
             cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
+              // HTTP環境（ローカルIPアクセス）でも動作するよう secure フラグを外す
+              cookieStore.set(name, value, { ...options, secure: false })
             )
           } catch {
             // Server Component からは set できないが問題なし

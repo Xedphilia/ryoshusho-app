@@ -12,9 +12,12 @@ import {
   RotateCcw,
   Save,
   Layers,
+  ZoomIn,
+  Plus,
 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import type { OcrResult, Purpose, StoreName } from '@/lib/supabase/types'
+
 
 type Mode = 'select' | 'camera' | 'preview' | 'ocr' | 'confirm'
 type CaptureMode = 'single' | 'batch'
@@ -41,6 +44,7 @@ export default function CapturePage() {
   const [storeNames, setStoreNames] = useState<StoreName[]>([])
   const [cameraReady, setCameraReady] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [currentEditIndex, setCurrentEditIndex] = useState(0)
 
   useEffect(() => {
@@ -143,14 +147,21 @@ export default function CapturePage() {
     newItems.forEach((_, i) => runOcr(i, files[i]))
   }
 
-  // OCR実行
+  // 1枚OCR実行（Gemini Vision APIに画像を直接送信・複数領収書対応）
   async function runOcr(index: number, blob: Blob) {
     setItems((prev) =>
       prev.map((item, i) => (i === index ? { ...item, processing: true, error: null } : item))
     )
 
     try {
-      const base64 = await blobToBase64(blob)
+      // 画像をbase64に変換してGemini Visionに直接送信
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve((reader.result as string).split(',')[1])
+        reader.onerror = reject
+        reader.readAsDataURL(blob)
+      })
+
       const storeNameList = storeNames.map((s) => s.name)
       const res = await fetch('/api/receipts/ocr', {
         method: 'POST',
@@ -162,19 +173,36 @@ export default function CapturePage() {
         }),
       })
       const json = await res.json()
+
       if (json.success) {
-        setItems((prev) =>
-          prev.map((item, i) =>
-            i === index
-              ? { ...item, ocrResult: json.data, processing: false }
-              : item
+        if (json.multiple && Array.isArray(json.data)) {
+          // 1枚の画像に複数の領収書が含まれていた場合、新しいアイテムとして展開
+          const newItems: CaptureItem[] = json.data.map((ocrResult: OcrResult) => ({
+            imageBlob: blob,
+            imageUrl: URL.createObjectURL(blob),
+            ocrResult,
+            purpose: '',
+            processing: false,
+            error: null,
+          }))
+          // 元のアイテムを削除して展開したアイテムに置き換える
+          setItems((prev) => {
+            const next = [...prev]
+            next.splice(index, 1, ...newItems)
+            return next
+          })
+        } else {
+          setItems((prev) =>
+            prev.map((item, i) =>
+              i === index ? { ...item, ocrResult: json.data as OcrResult, processing: false } : item
+            )
           )
-        )
+        }
       } else {
         setItems((prev) =>
           prev.map((item, i) =>
             i === index
-              ? { ...item, error: 'OCRに失敗しました', processing: false }
+              ? { ...item, error: json.error ?? 'OCRに失敗しました', processing: false }
               : item
           )
         )
@@ -183,35 +211,122 @@ export default function CapturePage() {
       setItems((prev) =>
         prev.map((item, i) =>
           i === index
-            ? { ...item, error: 'OCRに失敗しました', processing: false }
+            ? { ...item, error: 'OCRに失敗しました（ネットワークエラー）', processing: false }
             : item
         )
       )
     }
   }
 
-  // バッチ完了 → 確認画面へ
+  // バッチOCR実行（各枚をGemini Visionで並列処理）
+  async function runBatchOcr(targetItems: CaptureItem[], startIndex: number) {
+    // 対象を全部processing中にする
+    setItems((prev) =>
+      prev.map((item, i) =>
+        i >= startIndex && i < startIndex + targetItems.length
+          ? { ...item, processing: true, error: null }
+          : item
+      )
+    )
+
+    const storeNameList = storeNames.map((s) => s.name)
+
+    // 各画像をGemini Visionで並列OCR（複数領収書対応）
+    // 結果を一旦配列に収集してから一括でstateを更新する（並列splice競合防止）
+    type OcrOutcome =
+      | { kind: 'multiple'; blob: Blob; results: OcrResult[] }
+      | { kind: 'single'; result: OcrResult }
+      | { kind: 'error'; error: string }
+
+    const outcomes: OcrOutcome[] = await Promise.all(
+      targetItems.map(async (targetItem) => {
+        try {
+          const base64 = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.onload = () => resolve((reader.result as string).split(',')[1])
+            reader.onerror = reject
+            reader.readAsDataURL(targetItem.imageBlob)
+          })
+
+          const res = await fetch('/api/receipts/ocr', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              image_base64: base64,
+              mime_type: targetItem.imageBlob.type || 'image/jpeg',
+              store_names: storeNameList,
+            }),
+          })
+          const json = await res.json()
+
+          if (json.success) {
+            if (json.multiple && Array.isArray(json.data)) {
+              return { kind: 'multiple' as const, blob: targetItem.imageBlob, results: json.data as OcrResult[] }
+            } else {
+              return { kind: 'single' as const, result: json.data as OcrResult }
+            }
+          } else {
+            return { kind: 'error' as const, error: json.error ?? 'OCRに失敗しました' }
+          }
+        } catch {
+          return { kind: 'error' as const, error: 'OCRに失敗しました（ネットワークエラー）' }
+        }
+      })
+    )
+
+    // 全結果をまとめてstateに反映（indexのズレを防ぐため一括更新）
+    setItems((prev) => {
+      const next = [...prev]
+      let offset = 0
+      outcomes.forEach((outcome, i) => {
+        const idx = startIndex + i + offset
+        if (outcome.kind === 'multiple') {
+          const newItems: CaptureItem[] = outcome.results.map((ocrResult) => ({
+            imageBlob: outcome.blob,
+            imageUrl: URL.createObjectURL(outcome.blob),
+            ocrResult,
+            purpose: '',
+            processing: false,
+            error: null,
+          }))
+          next.splice(idx, 1, ...newItems)
+          offset += newItems.length - 1
+        } else if (outcome.kind === 'single') {
+          next[idx] = { ...next[idx], ocrResult: outcome.result, processing: false }
+        } else {
+          next[idx] = { ...next[idx], error: outcome.error, processing: false }
+        }
+      })
+      return next
+    })
+  }
+
+  // バッチ完了 → 確認画面へ（全枚まとめて1回のGeminiコール）
   function finishBatch() {
     if (items.length === 0) return
     stopCamera()
     setMode('confirm')
     setCurrentEditIndex(0)
-    // 未OCRのものを全部実行
-    items.forEach((item, i) => {
-      if (!item.ocrResult && !item.processing) {
-        runOcr(i, item.imageBlob)
-      }
-    })
+    // 未OCRのものをまとめてバッチ処理（1回のGeminiコールで済む）
+    const unprocessed = items
+      .map((item, i) => ({ item, i }))
+      .filter(({ item }) => !item.ocrResult && !item.processing)
+    if (unprocessed.length === 0) return
+    const startIndex = unprocessed[0].i
+    runBatchOcr(unprocessed.map(({ item }) => item), startIndex)
   }
 
   // 保存
   async function saveAll() {
     setSaving(true)
+    setSaveError(null)
     const supabase = createClient()
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { router.push('/auth/login'); return }
 
     let successCount = 0
+    const errors: string[] = []
+    let firstSavedMonth: string | null = null
     for (const item of items) {
       if (!item.ocrResult?.date || !item.ocrResult?.amount || !item.ocrResult?.store_name) continue
       try {
@@ -222,14 +337,18 @@ export default function CapturePage() {
           .from('receipt-images')
           .upload(path, item.imageBlob, { contentType: 'image/jpeg' })
 
-        if (uploadError) continue
+        if (uploadError) {
+          errors.push(`画像アップロード失敗: ${uploadError.message}`)
+          continue
+        }
 
         const { data: urlData } = supabase.storage.from('receipt-images').getPublicUrl(path)
         const imageUrl = urlData.publicUrl
 
         // DB に保存
         const ocr = item.ocrResult
-        await fetch('/api/receipts', {
+        const savedMonth = ocr.date!.slice(0, 7)
+        const res = await fetch('/api/receipts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -242,19 +361,29 @@ export default function CapturePage() {
             card_info: ocr.card_info,
             image_url: imageUrl,
             is_flagged: ocr.is_flagged,
-            month: ocr.date!.slice(0, 7),
+            month: savedMonth,
           }),
         })
+        const json = await res.json()
+        if (!json.success) {
+          errors.push(`DB保存失敗: ${json.error}`)
+          continue
+        }
+        if (!firstSavedMonth) firstSavedMonth = savedMonth
         successCount++
-      } catch {
-        // 個別エラーは無視して続行
+      } catch (e) {
+        errors.push(`保存エラー: ${e instanceof Error ? e.message : '不明なエラー'}`)
       }
     }
 
     setSaving(false)
+    if (errors.length > 0 && successCount === 0) {
+      setSaveError(errors[0])
+      return
+    }
     // Object URLをクリーンアップ
     items.forEach((item) => URL.revokeObjectURL(item.imageUrl))
-    router.push('/receipts')
+    router.push(`/receipts${firstSavedMonth ? `?month=${firstSavedMonth}` : ''}`)
   }
 
   // ── レンダリング ──
@@ -314,35 +443,46 @@ export default function CapturePage() {
     if (!item) return null
 
     return (
-      <ConfirmScreen
-        items={items}
-        currentIndex={currentEditIndex}
-        purposes={purposes}
-        saving={saving}
-        onIndexChange={setCurrentEditIndex}
-        onUpdateOcr={(i, field, value) => {
-          setItems((prev) =>
-            prev.map((it, idx) =>
-              idx === i
-                ? { ...it, ocrResult: it.ocrResult ? { ...it.ocrResult, [field]: value } : it.ocrResult }
-                : it
+        <ConfirmScreen
+          items={items}
+          currentIndex={currentEditIndex}
+          purposes={purposes}
+          saving={saving}
+          saveError={saveError}
+          onIndexChange={setCurrentEditIndex}
+          onUpdateOcr={(i, field, value) => {
+            setItems((prev) =>
+              prev.map((it, idx) =>
+                idx === i
+                  ? { ...it, ocrResult: it.ocrResult ? { ...it.ocrResult, [field]: value } : it.ocrResult }
+                  : it
+              )
             )
-          )
-        }}
-        onUpdatePurpose={(i, value) => {
-          setItems((prev) =>
-            prev.map((it, idx) => (idx === i ? { ...it, purpose: value } : it))
-          )
-        }}
-        onRetryOcr={(i) => runOcr(i, items[i].imageBlob)}
-        onRemove={(i) => {
-          URL.revokeObjectURL(items[i].imageUrl)
-          setItems((prev) => prev.filter((_, idx) => idx !== i))
-          setCurrentEditIndex(Math.max(0, i - 1))
-        }}
-        onSave={saveAll}
-        onBack={() => setMode('select')}
-      />
+          }}
+          onUpdatePurpose={(i, value) => {
+            setItems((prev) =>
+              prev.map((it, idx) => (idx === i ? { ...it, purpose: value } : it))
+            )
+          }}
+          onRetryOcr={(i) => runOcr(i, items[i].imageBlob)}
+          onRemove={(i) => {
+            URL.revokeObjectURL(items[i].imageUrl)
+            setItems((prev) => prev.filter((_, idx) => idx !== i))
+            setCurrentEditIndex(Math.max(0, i - 1))
+          }}
+          onAddPurpose={async (name) => {
+            await fetch('/api/purposes', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name }),
+            })
+            const res = await fetch('/api/purposes')
+            const json = await res.json()
+            if (json.success) setPurposes(json.data)
+          }}
+          onSave={saveAll}
+          onBack={() => setMode('select')}
+        />
     )
   }
 
@@ -457,19 +597,25 @@ interface ConfirmScreenProps {
   currentIndex: number
   purposes: Purpose[]
   saving: boolean
+  saveError: string | null
   onIndexChange: (i: number) => void
   onUpdateOcr: (i: number, field: string, value: unknown) => void
   onUpdatePurpose: (i: number, value: string) => void
   onRetryOcr: (i: number) => void
   onRemove: (i: number) => void
+  onAddPurpose: (name: string) => Promise<void>
   onSave: () => void
   onBack: () => void
 }
 
 function ConfirmScreen({
-  items, currentIndex, purposes, saving,
-  onIndexChange, onUpdateOcr, onUpdatePurpose, onRetryOcr, onRemove, onSave, onBack,
+  items, currentIndex, purposes, saving, saveError,
+  onIndexChange, onUpdateOcr, onUpdatePurpose, onRetryOcr, onRemove, onAddPurpose, onSave, onBack,
 }: ConfirmScreenProps) {
+  const [zoomIndex, setZoomIndex] = useState<number | null>(null)
+  const [zoomScale, setZoomScale] = useState(1.5)
+  const [purposeInputMode, setPurposeInputMode] = useState<'dropdown' | 'free'>('dropdown')
+
   const item = items[currentIndex]
   const ocr = item?.ocrResult
 
@@ -478,6 +624,7 @@ function ConfirmScreen({
   ).length
 
   return (
+    <>
     <div className="min-h-screen" style={{ background: 'var(--bg-primary)' }}>
       <header
         className="sticky top-0 z-10 flex items-center gap-3 px-4 py-3"
@@ -531,18 +678,33 @@ function ConfirmScreen({
       )}
 
       <div className="max-w-2xl mx-auto px-4 py-4 space-y-4">
+        {/* 保存エラー表示 */}
+        {saveError && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-red-600" style={{ background: '#FDE8E8' }}>
+            <AlertCircle size={14} />
+            {saveError}
+          </div>
+        )}
+
         {/* 画像プレビュー */}
         <div
-          className="rounded-2xl overflow-hidden"
+          className="rounded-2xl overflow-hidden relative"
           style={{ border: '1px solid var(--border)' }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={item.imageUrl}
             alt="領収書"
-            className="w-full max-h-48 object-contain"
-            style={{ background: '#f0f0f0' }}
+            className="w-full object-contain"
+            style={{ background: '#f0f0f0', maxHeight: '320px' }}
           />
+          <button
+            onClick={() => { setZoomIndex(currentIndex); setZoomScale(1.5) }}
+            className="absolute bottom-2 right-2 p-1.5 rounded-lg bg-black/50 text-white"
+            title="拡大表示"
+          >
+            <ZoomIn size={16} />
+          </button>
         </div>
 
         {/* OCR結果編集 */}
@@ -626,15 +788,41 @@ function ConfirmScreen({
                   />
                 </OcrField>
                 <OcrField label="用途">
-                  <select
-                    value={item.purpose}
-                    onChange={(e) => onUpdatePurpose(currentIndex, e.target.value)}
-                    className="w-full px-2 py-1.5 rounded-lg text-sm outline-none"
-                    style={{ border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
-                  >
-                    <option value="">未選択</option>
-                    {purposes.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
-                  </select>
+                  <div className="flex gap-1 mb-1">
+                    {(['dropdown', 'free'] as const).map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setPurposeInputMode(m)}
+                        className="px-2 py-0.5 rounded text-xs font-medium"
+                        style={{
+                          background: purposeInputMode === m ? '#7C5CBF' : 'var(--bg-primary)',
+                          color: purposeInputMode === m ? '#fff' : 'var(--text-muted)',
+                          border: `1px solid ${purposeInputMode === m ? '#7C5CBF' : 'var(--border)'}`,
+                        }}
+                      >
+                        {m === 'dropdown' ? 'プルダウン' : '自由入力'}
+                      </button>
+                    ))}
+                  </div>
+                  {purposeInputMode === 'dropdown' ? (
+                    <select
+                      value={item.purpose}
+                      onChange={(e) => onUpdatePurpose(currentIndex, e.target.value)}
+                      className="w-full px-2 py-1.5 rounded-lg text-sm outline-none"
+                      style={{ border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+                    >
+                      <option value="">未選択</option>
+                      {purposes.map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
+                    </select>
+                  ) : (
+                    <PurposeCombobox
+                      value={item.purpose}
+                      purposes={purposes}
+                      onChange={(v) => onUpdatePurpose(currentIndex, v)}
+                      onAddPurpose={onAddPurpose}
+                    />
+                  )}
                 </OcrField>
                 <OcrField label="支払方法">
                   <select
@@ -696,6 +884,95 @@ function ConfirmScreen({
         </div>
       </div>
     </div>
+
+    {/* ── ズームモーダル ───────────────────────── */}
+    {zoomIndex !== null && (() => {
+      const zItem = items[zoomIndex]
+      const zOcr = zItem?.ocrResult
+      const pct = `${Math.round(zoomScale * 100)}%`
+      return (
+        <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#000' }}>
+          {/* ヘッダー */}
+          <div className="flex items-center justify-between px-4 py-2.5" style={{ background: 'rgba(0,0,0,0.85)' }}>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setZoomScale((s) => Math.max(0.5, parseFloat((s - 0.25).toFixed(2))))}
+                className="w-8 h-8 rounded-full flex items-center justify-center text-white text-lg font-bold"
+                style={{ background: 'rgba(255,255,255,0.15)' }}
+              >−</button>
+              <span className="text-white text-sm w-14 text-center">{pct}</span>
+              <button
+                onClick={() => setZoomScale((s) => Math.min(5, parseFloat((s + 0.25).toFixed(2))))}
+                className="w-8 h-8 rounded-full flex items-center justify-center text-white text-lg font-bold"
+                style={{ background: 'rgba(255,255,255,0.15)' }}
+              >+</button>
+            </div>
+            <span className="text-white/50 text-xs">タップで閉じる: ×</span>
+            <button
+              className="p-2 rounded-full text-white"
+              style={{ background: 'rgba(255,255,255,0.15)' }}
+              onClick={() => setZoomIndex(null)}
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          {/* 画像エリア（スクロール可能） */}
+          <div className="overflow-auto" style={{ flex: '0 0 52vh', background: '#111' }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={zItem.imageUrl}
+              alt="領収書拡大"
+              style={{ width: `${zoomScale * 100}%`, display: 'block' }}
+            />
+          </div>
+
+          {/* 編集可能OCRパネル */}
+          <div className="overflow-auto px-4 py-3 space-y-2" style={{ flex: 1, background: '#1a1a2e' }}>
+            <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: 'rgba(255,255,255,0.4)' }}>
+              OCR結果 — 直接編集できます
+            </p>
+            {zOcr ? (
+              <div className="grid grid-cols-2 gap-2">
+                {([
+                  { label: '日付', field: 'date', type: 'date', span: 1 },
+                  { label: '金額（円）', field: 'amount', type: 'number', span: 1 },
+                  { label: '店名', field: 'store_name', type: 'text', span: 2 },
+                  { label: '品名', field: 'item_name', type: 'text', span: 2 },
+                ] as const).map(({ label, field, type, span }) => (
+                  <div key={field} className={span === 2 ? 'col-span-2' : ''}>
+                    <p className="text-xs mb-0.5" style={{ color: 'rgba(255,255,255,0.4)' }}>{label}</p>
+                    <input
+                      type={type}
+                      value={field === 'amount'
+                        ? (zOcr.amount ?? '')
+                        : (zOcr[field as 'date' | 'store_name' | 'item_name'] ?? '')}
+                      onChange={(e) => {
+                        const val = field === 'amount'
+                          ? (parseInt(e.target.value) || null)
+                          : (e.target.value || null)
+                        onUpdateOcr(zoomIndex, field, val)
+                      }}
+                      className="w-full px-2 py-1.5 rounded-lg text-sm outline-none"
+                      style={{ background: 'rgba(255,255,255,0.1)', color: '#fff', border: '1px solid rgba(255,255,255,0.2)' }}
+                    />
+                  </div>
+                ))}
+                {zOcr.is_flagged && (
+                  <div className="col-span-2 flex items-start gap-2 px-2 py-1.5 rounded-lg" style={{ background: '#7C3317' }}>
+                    <AlertCircle size={13} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-amber-300">{zOcr.flag_reasons.join(' / ')}</p>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-xs text-center py-4" style={{ color: 'rgba(255,255,255,0.3)' }}>OCR処理中...</p>
+            )}
+          </div>
+        </div>
+      )
+    })()}
+    </>
   )
 }
 
@@ -711,6 +988,79 @@ function OcrField({
         {required && <span className="text-red-400">*</span>}
       </label>
       {children}
+    </div>
+  )
+}
+
+// ── 用途コンボボックス ──────────────────────────────────
+function PurposeCombobox({
+  value, purposes, onChange, onAddPurpose,
+}: {
+  value: string
+  purposes: Purpose[]
+  onChange: (v: string) => void
+  onAddPurpose: (name: string) => Promise<void>
+}) {
+  const [open, setOpen] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const filtered = purposes.filter((p) =>
+    p.name.toLowerCase().includes(value.toLowerCase())
+  )
+  const showAdd = value.trim() && !purposes.some((p) => p.name === value.trim())
+
+  async function handleAdd() {
+    if (!value.trim()) return
+    setAdding(true)
+    await onAddPurpose(value.trim())
+    setAdding(false)
+    setOpen(false)
+  }
+
+  return (
+    <div className="relative">
+      <input
+        ref={inputRef}
+        type="text"
+        value={value}
+        onChange={(e) => { onChange(e.target.value); setOpen(true) }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="未選択 または 入力"
+        className="w-full px-2 py-1.5 rounded-lg text-sm outline-none"
+        style={{ border: '1px solid var(--border)', background: 'var(--bg-primary)', color: 'var(--text-primary)' }}
+      />
+      {open && (filtered.length > 0 || showAdd) && (
+        <div
+          className="absolute z-20 left-0 right-0 rounded-lg overflow-hidden shadow-lg"
+          style={{ top: '100%', marginTop: 2, background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+        >
+          {filtered.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onMouseDown={() => { onChange(p.name); setOpen(false) }}
+              className="w-full text-left px-3 py-2 text-sm hover:opacity-80"
+              style={{ color: 'var(--text-primary)' }}
+            >
+              {p.name}
+            </button>
+          ))}
+          {showAdd && (
+            <button
+              type="button"
+              onMouseDown={handleAdd}
+              disabled={adding}
+              className="w-full text-left px-3 py-2 text-sm font-medium flex items-center gap-1.5"
+              style={{ color: '#7C5CBF', borderTop: '1px solid var(--border)' }}
+            >
+              <Plus size={13} />
+              {adding ? '追加中...' : `「${value.trim()}」を追加`}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

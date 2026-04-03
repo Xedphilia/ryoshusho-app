@@ -8,11 +8,6 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const supabase = await createClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
-  }
-
   const { id } = await params
   const body: ReceiptUpdate = await request.json()
 
@@ -25,7 +20,6 @@ export async function PUT(
     .from('receipts')
     .update(body)
     .eq('id', id)
-    .eq('user_id', user.id)
     .select()
     .single()
 
@@ -42,11 +36,6 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const supabase = await createClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
-  }
-
   const { id } = await params
 
   // まず画像URLを取得（Storageから削除するため）
@@ -54,14 +43,12 @@ export async function DELETE(
     .from('receipts')
     .select('image_url')
     .eq('id', id)
-    .eq('user_id', user.id)
     .single()
 
   const { error } = await supabase
     .from('receipts')
     .delete()
     .eq('id', id)
-    .eq('user_id', user.id)
 
   if (error) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 })

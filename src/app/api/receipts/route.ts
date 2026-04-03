@@ -5,10 +5,6 @@ import type { ReceiptInsert } from '@/lib/supabase/types'
 // GET /api/receipts?month=YYYY-MM
 export async function GET(request: NextRequest) {
   const supabase = await createClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
-  }
 
   const { searchParams } = new URL(request.url)
   const month = searchParams.get('month')
@@ -16,7 +12,6 @@ export async function GET(request: NextRequest) {
   let query = supabase
     .from('receipts')
     .select('*')
-    .eq('user_id', user.id)
     .order('date', { ascending: true })
 
   if (month) {
@@ -34,16 +29,11 @@ export async function GET(request: NextRequest) {
 // POST /api/receipts
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
-  }
 
-  const body: Omit<ReceiptInsert, 'user_id'> = await request.json()
+  const body: Omit<ReceiptInsert, 'user_id' | 'month'> = await request.json()
 
   const insert: ReceiptInsert = {
     ...body,
-    user_id: user.id,
     month: body.date.slice(0, 7), // YYYY-MM
   }
 

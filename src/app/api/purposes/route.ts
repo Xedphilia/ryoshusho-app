@@ -4,15 +4,10 @@ import { createClient } from '@/lib/supabase/server'
 // GET /api/purposes
 export async function GET() {
   const supabase = await createClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
-  }
 
   const { data, error } = await supabase
     .from('purposes')
     .select('*')
-    .eq('user_id', user.id)
     .order('sort_order', { ascending: true })
 
   if (error) {
@@ -25,10 +20,6 @@ export async function GET() {
 // POST /api/purposes
 export async function POST(request: NextRequest) {
   const supabase = await createClient()
-  const { data: { user }, error: authError } = await supabase.auth.getUser()
-  if (authError || !user) {
-    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
-  }
 
   const { name }: { name: string } = await request.json()
   if (!name?.trim()) {
@@ -39,7 +30,6 @@ export async function POST(request: NextRequest) {
   const { data: existing } = await supabase
     .from('purposes')
     .select('sort_order')
-    .eq('user_id', user.id)
     .order('sort_order', { ascending: false })
     .limit(1)
 
@@ -47,7 +37,7 @@ export async function POST(request: NextRequest) {
 
   const { data, error } = await supabase
     .from('purposes')
-    .insert({ user_id: user.id, name: name.trim(), sort_order: nextOrder })
+    .insert({ name: name.trim(), sort_order: nextOrder })
     .select()
     .single()
 

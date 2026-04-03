@@ -18,7 +18,8 @@ export async function updateSession(request: NextRequest) {
           )
           supabaseResponse = NextResponse.next({ request })
           cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
+            // HTTP環境（ローカルIPアクセス）でも動作するよう secure フラグを外す
+            supabaseResponse.cookies.set(name, value, { ...options, secure: false })
           )
         },
       },

@@ -12,14 +12,15 @@ export interface Receipt {
   image_url: string
   is_flagged: boolean
   month: string // YYYY-MM
+  title: string | null
   created_at: string
-  user_id: string
+  user_id?: string | null
 }
 
 export interface StoreName {
   id: string
   name: string
-  user_id: string
+  user_id?: string | null
   created_at: string
 }
 
@@ -27,7 +28,7 @@ export interface Purpose {
   id: string
   name: string
   sort_order: number
-  user_id: string
+  user_id?: string | null
   created_at: string
 }
 

@@ -29,6 +29,7 @@ export interface Message {
   id: string;
   role: "user" | "assistant";
   content: string;
+  imageUrl?: string; // 添付画像（base64 data URL）
   timestamp: number;
 }
 
@@ -37,6 +38,7 @@ export interface AgentSession {
   messages: Message[];
   completed: boolean;
   summary?: string;
+  codexReview?: string; // Codex + Ollamaによる自動コードレビュー結果
 }
 
 export interface Project {
